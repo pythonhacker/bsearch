@@ -87,13 +87,12 @@ Currently we index metadata of only PDF files so such queries make sense only fo
 
 ## Storage
 
-The "index" is created stored in the folder `~/.local/state/bsearch.db`. It is a simple inverted
-index that uses fodlers and files as keys and contents as value.
+The indices are created and stored in the folder `~/.local/state/bsearch.db`.
+It uses a simple inverted index that uses folders and files as keys and contents as value.
 
 ## Performance
 
 When not indexing metadata, at the rate of about 60 files/second.
 When indexing PDF metadata, at the rate of about 17 files/second.
 
-Benchmark done on a Lenovo laptop with 16 core CPU/24GB RAM on a linux ext4
-filesystem.
+Benchmark were done on a Lenovo laptop with 16 core CPU/24GB RAM on a linux ext4 filesystem.
