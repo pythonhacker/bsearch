@@ -1,0 +1,421 @@
+#!/bin/bash
+# Search engine for the shell in pure bash
+
+# cmd1 | cmd2 .. fails if any command in the pipe fails
+set -o pipefail
+# Enable nullglob so the array stays empty if nothing matches
+shopt -s nullglob
+
+# Basic bash indexing and searching script
+# Declare some associative arrays
+
+# Main params
+FILE_TYPE=""
+ROOT_FOLDER="${PWD}"
+SEARCH_QUERY=""
+
+# Constants
+INDEX_FOLDER="${HOME}/.local/state/bsearch.db"
+# For storing path elements reverse index
+PATH_INDEX="path.db"
+# For storing hash(filepath) reverse index
+HASH_INDEX="hash.db"
+# For storing other metadata reverse index
+META_INDEX="meta.db"
+# Filename limits
+FILENAME_MAX=$(getconf NAME_MAX ${HOME})
+
+die() { printf 'bsearch: error: %s\n' "$*" >&2; exit 2; }
+
+# Temp file containing file paths
+paths_file="$(mktemp "/tmp/.paths.XXXXXX")" || { rm -f -- "$tmp_index"; die "cannot create temporary path list"; }
+cleanup() { rm -f -- "$paths_file"; }
+trap cleanup EXIT
+
+# We need one of these for PDF meta 
+pdfinfo_cmd=$(command -v pdfinfo)
+exiftool_cmd=$(command -v exiftool)
+
+log_message() {
+	dstamp=$(date +'%Y-%m-%d %H:%M:%S')
+    printf "%s %s" "[${dstamp}]" "$1"
+}
+
+# Upon start
+init() {
+	mkdir -p ${INDEX_FOLDER} || die "error creating index folder"
+	# Create sub-folders
+	# We will create sub-folders for path, hash, meta
+	sub_indices=(${PATH_INDEX} ${HASH_INDEX} ${META_INDEX})
+	for sub_index in ${sub_indices[@]}
+	do
+		mkdir -p ${INDEX_FOLDER}/${sub_index}
+	done
+}					 
+
+# Create index folders on init
+init
+
+usage()
+{
+	cat <<'EOF'
+Usage:
+	bsearch -t [<file_ext> e.g: pdf, all ...]
+	bsearch -r [<root_dir>]
+	bsearch -s [query]
+
+Optiions:
+	-t EXTN		Index files with this extension/type (e.g: pdf, docx, all)
+	-r ROOT		Directory to scan (defaults to: ${PWD}).
+	-s QUERY	Run in search mode, searching results for "query".
+			For meta queries use "field:query" format, e.g: "creator: writer"
+			or "title:untitled".
+
+CAVEATS:
+
+1. Boolean queries are not supported right now. Only a single search query can be run.
+2. Metadata processing and search only available for PDF files.
+ 
+EOF
+}
+
+# Don't run without arguments
+if [ $# -eq 0 ]; then
+	usage
+    exit 1
+fi
+
+# Parse arguments
+while getopts 't:r:s:h' opt; do
+	case $opt in
+		t)
+			FILE_TYPE="$OPTARG";
+			if [[ ${FILE_TYPE} = "all" ]]; then
+				FILE_TYPE="";
+			fi
+			;;
+		r)
+			ROOT_FOLDER="${OPTARG}";;
+		s)
+			    # lowercase
+				SEARCH_QUERY="${OPTARG,,}";;
+		?|h)
+			usage;
+			exit 1;;
+	esac
+done
+
+# Commands to store data in our folder "hash store"
+store_get () { local key=$1; index=$2; cat "${INDEX_FOLDER}/${index}/$key" 2>/dev/null; }
+store_rm  () { local key=$1; index=$2; rm "${INDEX_FOLDER}/${index}/$key"; }
+
+store_put () {
+	local key=$1; index=$2; value=$3;
+	# How many keys put
+	local count=0
+	# Key with spaces - create separate entries for each item
+	if [[ ${key} =~ [[:space:]] ]]; then
+		for sub_key in ${key}
+		do
+			local file_path="${INDEX_FOLDER}/${index}/${sub_key}"
+			# Check if file exists AND if the value is already inside it
+            if [[ -f "$file_path" ]] && grep -Fq "$value" "$file_path"; then
+                continue # Skip to the next sub_key if value already exists
+            fi
+			printf %s "$value" >>"${file_path}";
+			((count+=1))
+		done
+	else
+		local file_path="${INDEX_FOLDER}/${index}/${key}"
+		if [[ -f "$file_path" ]] && grep -Fq "$value" "$file_path"; then
+			return ${count}					
+        fi
+		printf %s "$value" >>"${file_path}"
+		((count+=1))		
+	fi
+
+	return ${count}
+}
+
+store_put_meta () {
+	local key=$1; index=${META_INDEX}; sub_key=$2; value=$3;
+	# How many keys put
+	local count=0
+	# Replace any / chars for safe key
+	safe_sub_key="${sub_key//\//-}"
+	local dir_path="${INDEX_FOLDER}/${index}/${key}/"
+	mkdir -p "${dir_path}"
+	for sub in ${safe_sub_key}
+	do
+		local file_path="${dir_path}/${sub}"
+		# Check if file exists AND if the value is already inside it
+        if [[ -f "$file_path" ]] && grep -Fq "$value" "$file_path"; then
+            continue # Skip to the next sub_key if value already exists
+        fi
+		printf %s "$value" >>"${file_path}";
+		((count+=1))
+	done
+
+	# Also for the entire subkey
+	local file_path="${dir_path}/${safe_sub_key}"
+	if [[ -f "$file_path" ]] && grep -Fq "$value" "$file_path"; then
+		return ${count}		
+    fi
+	# Skip the entire subkey if the filename is too long
+	if (( ${#file_path} < ${FILENAME_MAX} )); then
+		printf %s "$value" >>"${file_path}"
+	fi
+	((count+=1))		
+
+	return ${count}
+}
+
+store_fuzzy_get () {
+	key=$1; index=$2;
+	# Do a prefix search and return the keys
+	pattern="${INDEX_FOLDER}/${index}/*${key}*"
+	for f in ${pattern}; do
+		fpath=$(basename $f)
+		if [[ -z "${fpath}" ]]; then
+		   continue
+		fi
+		# Fetch the value
+		store_get "${fpath}" "${PATH_INDEX}"
+	done
+	
+}
+
+store_meta_get () {
+	key=$1; index=${META_INDEX}; sub_key=$2;
+	pattern="${INDEX_FOLDER}/${index}/${key}/*${sub_key}*"
+	for fpath in ${pattern}; do
+		if [[ ! -f ${fpath} ]]; then
+			continue
+		fi
+		# This contains the file indices, open and read
+		IFS=$'\\n' read -d '' -r -a paths < "${fpath}"
+		for file_id in ${paths[@]}; do
+			printf "%s\n" ${file_id}
+		done
+	done
+}
+
+start_message() {
+	if [[ -n ${SEARCH_QUERY} ]]; then
+		printf "Running in search mode with query \"%s\"\n" ${SEARCH_QUERY}
+	elif [[ -n ${FILE_TYPE} ]]; then
+		printf "Running in indexing mode - invoked on %s with filetype %s\n" ${ROOT_FOLDER} ${FILE_TYPE}
+	else
+		printf "Running in indexing mode - Invoked on %s\n" ${ROOT_FOLDER}
+	fi
+}
+
+# Split a file path into chunks 
+split_path() {
+	local IFS='/'
+	read -ra chunks <<< "$1"
+	# Filter empty elements
+	for chunk in "${chunks[@]}"; do
+		[[ -n "$chunk" ]] && echo "$chunk"
+	done
+}
+
+# List the search hits
+list_hits() {
+	# Reconstruct into array
+	local hits=("$@")
+	count=0
+
+	# Remove dups
+	declare -A unique_map
+	
+	for hit in ${hits[@]}
+	do
+		# Map to filename by looking up the hash index
+		fpath=$(store_get ${hit} ${HASH_INDEX})
+		if [[ -z "${fpath}" ]]; then
+			continue
+		fi
+		unique_map["$fpath"]=1
+	done
+
+	# Extract back into regular array
+	hits_dedup=("${!unique_map[@]}")
+	for fpath in "${hits_dedup[@]}"; do
+		printf "%s\n" "${fpath}"
+		((count+=1))
+	done
+	
+	printf "\nFound ${count} hits for query \"${SEARCH_QUERY}\".\n"	
+}
+
+extract_metapdf() {
+	local fpath="$1"
+	local file_id="$2"
+	local metadata=""
+
+	# If tools don't exist, give up
+	if [[ -z ${pdfinfo_cmd} && -z ${exiftool_cmd} ]]; then
+		return 0
+	fi
+	
+	if [[ -n ${pdfinfo_cmd} ]]; then
+		metadata=$(${pdfinfo_cmd} "${fpath}" 2>/dev/null)
+	elif [[ -n ${exiftool_cmd} ]]; then 
+		metadata=$(${exiftool_cmd} "${fpath}" 2>/dev/null)
+	fi
+
+	if [[ -z "${metadata}" ]]; then
+		return 0
+	fi
+
+	local total=0
+	# These are our keys of interest
+	local meta_keys=("creator" "producer" "pdf version" "tagged" "title" "encrypted")
+	while IFS='|' read -r key value; do
+		# lowercase
+		key="${key,,}"
+		value="${value,,}"
+		# trim leading spaces
+		value="${value#"${value%%[![:space:]]*}"}"
+		# trim trailing spaces		
+		value="${value%"${value##*[![:space:]]}"}"
+		# If value is empty skip
+		if [[ -z "${value}" ]]; then
+			continue
+		fi
+		for meta_key in "${meta_keys[@]}"; do
+			# Keys of our interest
+			if [[ "${meta_key}" == "${key}" ]]; then
+				# Store it with a proper prefix
+				# Only 'pdf version' => 'version'
+				if [[ "${key}" == "pdf version" ]]; then
+					key="version"
+				elif [[ "${key}" == "encrypted" ]]; then
+					# For encrypted we only need the yes or no
+					# ignore anything in (...) after it
+					value="${value%%(*}"
+				fi
+					
+				store_put_meta "${key}" "${value}" "${file_id}\n"
+				local ret=$?
+				((total+=ret))
+			fi
+		done
+	done < <(printf "%s" "${metadata}" | awk -F ':' 'NF>=2{print $1 "|" $2}')
+
+	return ${total}
+}
+
+perform_search() {
+	# Meta search if there is : in the string
+	if [[ "${SEARCH_QUERY}" == *":"* ]]; then
+		query="${SEARCH_QUERY}"
+		# Split to left of :
+		key="${query%%:*}"
+		# Split to right of :
+		value="${query#*:}"
+		printf "Performing meta search using key=%s and value=%s\n\n" ${key} ${value}
+		matches=$(store_meta_get "${key}" "${value}")
+	else
+		# Try exact match
+		printf "\n"
+		matches=$(store_get "${SEARCH_QUERY}" "${PATH_INDEX}")
+		# Also try fuzzy matches
+		matches+=$(store_fuzzy_get "${SEARCH_QUERY}" "${PATH_INDEX}")
+	fi
+	# Split by array
+	IFS=$'\\n' read -d '' -r -a hits <<< "$matches"
+	list_hits "${hits[@]}"
+	
+}
+
+# Build a list of files to index
+# Optionally accepts file types as extensions
+: > "$paths_file"
+build_flist() {
+    local extn="$1"
+    shift
+    local root="$1"
+	local count=0
+	
+	printf "Building list of files...\n"
+    if [[ -n "$extn" ]]; then
+          find "$root" -name ".*" -prune -o \( -type f -o -type l \) ! -name '.*' -name "*.${extn}" -print0
+    else
+          find "$root" -name ".*" -prune -o \( -type f -o -type l \) ! -name '.*' -print0
+    fi |
+    while IFS= read -r -d '' fpath; do
+        printf '%s\n' "$fpath" >> "$paths_file"
+		((count++))
+		printf "\rProcessed #%d files." "$count"
+    done
+}
+
+# Buld the indices for files
+index_files() {
+
+	local total=0; index_total=0; index_meta=0;
+	local current_path="";
+
+	printf "\nCreating indices...\n"
+	while IFS= read -r current_path;
+	do
+		# Trim newline if any
+		current_path="${current_path%$'\n'}"
+		# Construct hash of the path as a unique file id
+		local file_id="$(printf '%s' "$current_path" | sha256sum)"
+		file_id="${file_id%% *}"
+		# Save this in the hash index
+		store_put "$file_id" ${HASH_INDEX} "${current_path}"
+		local ret=$?
+		((index_total+=$ret))
+		# Read into an path array
+		mapfile -t path_array < <(split_path "$current_path")
+		# For each entry in path, store it as a reverse index
+		for path in ${path_array[@]}; do
+			# Lowercase
+			local path_l=${path,,}
+			# This goes to the path index
+			store_put "$path_l" ${PATH_INDEX} "$file_id\n"
+			local ret=$?
+			((index_total+=ret))			
+		done
+		# Extract metadata entries if file is pdf
+		[[ "${current_path,,}" == *.pdf ]] && extract_metapdf "${current_path}" ${file_id}
+		local ret=$?
+		# Update counts
+		((index_meta+=ret))
+		((index_total+=ret))
+		((total+=1))
+		printf "\rIndexed #%d files..." "${total}"		
+	done < "$paths_file"
+	printf "\n"
+	printf "Created %d meta index entries.\n" ${index_meta}
+	printf "Created %d total index entries.\n" ${index_total}
+}
+
+# Performs the file indexing
+perform_index() {
+	# First build file list
+	# Get full path to folder
+	ROOT_FOLDER=$(realpath ${ROOT_FOLDER})
+	build_flist "${FILE_TYPE}" "${ROOT_FOLDER}"
+	# If we didn't detect any file, there is nothing to do
+	local line_count=$(wc -l < "$paths_file")
+	if [[ ${line_count} -eq 0 ]];
+	then
+		printf "No files were found, goodbye."
+		exit 1
+	fi
+	index_files
+}
+
+# Main body
+start_message
+
+if [[ -n "${SEARCH_QUERY}" ]]; then
+	perform_search
+else
+	perform_index
+fi
