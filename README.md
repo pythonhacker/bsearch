@@ -112,3 +112,9 @@ When not indexing metadata, at the rate of about 60 files/second.
 When indexing PDF metadata, at the rate of about 17 files/second.
 
 Benchmark were done on a Lenovo laptop with 16 core CPU/24GB RAM on a linux ext4 filesystem.
+
+## Unit Tests
+A unit test file is available, run it using:
+
+	$ ./test_bsearch.sh ./bsearch
+	
