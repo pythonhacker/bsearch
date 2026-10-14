@@ -6,9 +6,6 @@ set -o pipefail
 # Enable nullglob so the array stays empty if nothing matches
 shopt -s nullglob
 
-# Basic bash indexing and searching script
-# Declare some associative arrays
-
 # Main params
 FILE_TYPE=""
 ROOT_FOLDER="${PWD}"
