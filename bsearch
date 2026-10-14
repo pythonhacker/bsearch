@@ -375,7 +375,7 @@ build_flist() {
        # Buld the indices for files
        index_files() {
 
-           local total=0; index_total=0; index_meta=0;
+           local total=0; index_total=0; index_meta=0; index_hash=0; index_path=0;
            local current_path="";
 
            printf "\nCreating indices...\n"
@@ -388,8 +388,9 @@ build_flist() {
                file_id="${file_id%% *}"
                # Save this in the hash index
                store_put "$file_id" ${HASH_INDEX} "${current_path}"
-               local ret=$?
-               ((index_total+=$ret))
+               local ret_hash=$?
+               ((index_total+=$ret_hash))
+               ((index_hash+=$ret_hash))			   
                # Read into an path array
                mapfile -t path_array < <(split_path "$current_path")
                # For each entry in path, store it as a reverse index
@@ -398,19 +399,25 @@ build_flist() {
                    local path_l=${path,,}
                    # This goes to the path index
                    store_put "$path_l" ${PATH_INDEX} "$file_id\n"
-                   local ret=$?
-                   ((index_total+=ret))         
+                   local ret_path=$?
+                   ((index_total+=ret_path))
+                   ((index_path+=ret_path))         				   
                done
-               # Extract metadata entries if file is pdf
-               [[ "${current_path,,}" == *.pdf ]] && extract_metapdf "${current_path}" ${file_id}
-               local ret=$?
-               # Update counts
-               ((index_meta+=ret))
-               ((index_total+=ret))
+               # Extract metadata entries
+			   # Right now only for PDF files
+               if [[ "${current_path,,}" == *.pdf ]]; then
+				   extract_metapdf "${current_path}" ${file_id}
+				   local ret_meta=$?
+				   # Update counts
+				   ((index_meta+=ret_meta))
+				   ((index_total+=ret_meta))
+			   fi
                ((total+=1))
                printf "\rIndexed #%d files..." "${total}"       
            done < "$paths_file"
            printf "\n"
+           printf "Created %d hash index entries.\n" ${index_hash}
+           printf "Created %d path index entries.\n" ${index_path}		   		   
            printf "Created %d meta index entries.\n" ${index_meta}
            printf "Created %d total index entries.\n" ${index_total}
        }

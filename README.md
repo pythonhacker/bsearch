@@ -23,7 +23,7 @@ Indexing is the default mode and can be invoked with the `-r` and `-t` parameter
 root folder and filetype respectively. By default all files are indexed.
 
 The filetype if given should be the extension of the required file without the "." prefix - for example "pdf" for PDFs.
-At present it doesn't accept mimetypes so each extension has to be given specifically.
+It also accepts mimetypes - for example `image/jpeg` for all JPEG/JFIF images.
 
 When indexing, it gives a running count of the files.
 
@@ -32,20 +32,36 @@ When indexing, it gives a running count of the files.
 	$ ./bsearch -t pdf -r ~
 	Running in indexing mode - invoked on /home/anand with filetype pdf
 	Building list of files...
-	Processed #1212 files.
+	Processed #1209 files.
 	Creating indices...
-	Indexed #1212 files...
-	Created 11336 meta index entries.
-	Created 24046 total index entries.
+	Indexed #1209 files...
+	Created 1209 hash index entries.
+	Created 11477 path index entries.
+	Created 11313 meta index entries.
+	Created 23999 total index entries.
 
-	$ ./bsearch -r ~/Documents
-	Running in indexing mode - Invoked on /home/anand/Documents
+	$ ./bsearch -r ~/Documents/
+	Running in indexing mode - Invoked on /home/anand/Documents/
 	Building list of files...
 	Processed #177 files.
 	Creating indices...
 	Indexed #177 files...
-	Created 133 meta index entries.
-	Created 701 total index entries.
+	Created 177 hash index entries.
+	Created 1051 path index entries.
+	Created 1023 meta index entries.
+	Created 2251 total index entries.
+
+	$ ./bsearch -t image/jpeg -r ~/Pictures
+	Running in indexing mode - invoked on /home/anand/Pictures with filetype image/jpeg
+	Mimetype given, fetching extensions for image/jpeg
+	Building list of files...
+	Processed #5730 files.
+	Creating indices...
+	Indexed #5730 files...
+	Created 5730 hash index entries.
+	Created 42441 path index entries.
+	Created 0 meta index entries.
+	Created 48171 total index entries.
 
 Note that the indexing is done only for file metadata — such as paths and file extension and document
 level metadata for PDFs. No actual content is ingested.
