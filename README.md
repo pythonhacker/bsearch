@@ -22,10 +22,10 @@ The tool has two modes - Indexing and Searching.
 Indexing is the default mode and can be invoked with the `-r` and `-t` parameters, which stands for the
 root folder and filetype respectively. By default all files are indexed.
 
-The filetype if given should be the extension of the required file without the ".".
+The filetype if given should be the extension of the required file without the "." prefix - for example "pdf" for PDFs.
+At present it doesn't accept mimetypes so each extension has to be given specifically.
 
-For example "pdf" for PDFs, at present it doesn't accept mimetypes so each extension has to be given specifically.
-kWhen indexing, it gives a running count of the files.
+When indexing, it gives a running count of the files.
 
 ### Indexing 
 
