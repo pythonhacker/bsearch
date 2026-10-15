@@ -1,0 +1,30 @@
+name: bsearch tests
+
+on:
+  pull_request:
+    branches:
+      - main
+    types:
+      - opened
+      - synchronize
+      - reopened
+      - ready_for_review
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    name: Run Bash tests
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Check Bash syntax
+        run: bash -n bsearch test_bsearch.sh
+
+      - name: Run bsearch tests
+        run: bash test_bsearch.sh ./bsearch
+
