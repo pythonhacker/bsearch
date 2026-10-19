@@ -77,7 +77,6 @@ Examples:
 
 	$ ./bsearch -s matterhorn
 	Running in search mode with query "matterhorn"
-	No exact matches found for "matterhorn", trying fuzzy matches
 
 	/home/anand/Documents/Matterhorn-Protocol-1-1.txt
 	/home/anand/Documents/Matterhorn-Protocol-1-1.pdf
@@ -86,6 +85,7 @@ Examples:
 
 	$ ./bsearch -s python
 	Running in search mode with query "python"
+	
 	/home/anand/programs/python/rfc3917.pdf
 	/home/anand/programs/python/text2pdf.pdf
 	/home/anand/programs/python/rfc3164.pdf
