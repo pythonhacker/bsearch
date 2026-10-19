@@ -105,6 +105,7 @@ done
 store_get () { local key=$1; index=$2; cat "${INDEX_FOLDER}/${index}/$key" 2>/dev/null; }
 store_rm  () { local key=$1; index=$2; rm "${INDEX_FOLDER}/${index}/$key"; }
 
+# Generic function for adding keys to kv store
 store_put () {
     local key=$1; index=$2; value=$3;
     # How many keys put
@@ -122,6 +123,7 @@ store_put () {
             ((count+=1))
         done
     else
+		# Single key
         local file_path="${INDEX_FOLDER}/${index}/${key}"
         if [[ -f "$file_path" ]] && grep -Fq "$value" "$file_path"; then
             return ${count}                 
@@ -133,6 +135,39 @@ store_put () {
     return ${count}
 }
 
+# Function for adding keys to kv hash store
+store_put_hash() {
+    local key=$1; index=${HASH_INDEX}; value=$2;
+
+	# The hashes are like
+	# fff9b146a978ba4fed0479bd0ae1327762598a8f763bde065d8216b660b41740
+	# So if we keep adding them to same folder, the inode table
+	# gets overloaded and file loading becomes slow as the directory
+	# grows.
+
+	# The solution is to store them in "cache" folder format, means
+	# to create directories for the first three 2 byte entries
+	# and to store the entry in the remaining bytes as file.
+	# So in this case the path looks like
+	# ff/f9/b1/46a978ba4fed0479bd0ae1327762598a8f763bde065d8216b660b41740
+	# This has the net effect of distributing files across a uniform
+	# number of folders in the tree.
+	dirpath="${INDEX_FOLDER}/${index}/${key:0:2}/${key:2:2}/${key:4:2}"
+	mkdir -p "${dirpath}"
+	# File name
+	fname="${key:6}"
+	fpath="${dirpath}/${fname}"
+	# If file exists, we assume this is good to avoid a file write
+	if [[ -f "${fpath}" ]]; then
+		return 0
+	else
+		# Ignore ovewrites, we can avoid cost of a grep
+		printf %s "$value" > "${dirpath}/${fname}"
+		return 1
+	fi
+}
+
+# Make entries for meta keys in the kv store
 store_put_meta () {
     local key=$1; index=${META_INDEX}; sub_key=$2; value=$3;
     # How many keys put
@@ -166,6 +201,7 @@ store_put_meta () {
     return ${count}
 }
 
+# Fuzzy get matches keys anywhere in the path
 store_fuzzy_get () {
     key=$1; index=$2;
     # Do a prefix search and return the keys
@@ -181,6 +217,7 @@ store_fuzzy_get () {
     
 }
 
+# Fetch values for meta key entries
 store_meta_get () {
     key=$1; index=${META_INDEX}; sub_key=$2;
     pattern="${INDEX_FOLDER}/${index}/${key}/*${sub_key}*"
@@ -194,6 +231,17 @@ store_meta_get () {
             printf "%s\n" ${file_id}
         done
     done
+}
+
+# Fetch values for hash key entries
+store_hash_get () {
+    local key=$1; index=${HASH_INDEX};
+	dirpath="${INDEX_FOLDER}/${index}/${key:0:2}/${key:2:2}/${key:4:2}"	
+	fname="${key:6}"	
+	fpath="${dirpath}/${fname}"
+	if [[ -f "${fpath}" ]]; then
+		cat "${fpath}" 2>/dev/null;
+	fi
 }
 
 start_message() {
@@ -228,7 +276,8 @@ list_hits() {
     for hit in ${hits[@]}
     do
         # Map to filename by looking up the hash index
-        fpath=$(store_get ${hit} ${HASH_INDEX})
+        # fpath=$(store_get ${hit} ${HASH_INDEX})
+		fpath=$(store_hash_get ${hit})
         if [[ -z "${fpath}" ]]; then
             continue
         fi
@@ -387,7 +436,7 @@ build_flist() {
                local file_id="$(printf '%s' "$current_path" | sha256sum)"
                file_id="${file_id%% *}"
                # Save this in the hash index
-               store_put "$file_id" ${HASH_INDEX} "${current_path}"
+               store_put_hash "$file_id" "${current_path}"
                local ret_hash=$?
                ((index_total+=$ret_hash))
                ((index_hash+=$ret_hash))			   
