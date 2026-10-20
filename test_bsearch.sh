@@ -5,8 +5,8 @@
 #   bash tests/test_bsearch.sh [path/to/bsearch]
 #
 # The tests run bsearch with a temporary HOME, so they do not touch the
-# caller's real ~/.local/state/bsearch.db. A fake pdfinfo provides repeatable
-# PDF metadata without requiring real PDF fixtures or Poppler.
+# caller's real ~/.local/state/bsearch.db. Fake pdfinfo and exiftool commands
+# provide repeatable metadata without requiring real media files or those tools.
 
 # NOTE: This test is generated using AI (ChatGPT GPT-6).
 
@@ -20,6 +20,7 @@ if [[ ! -x "$SCRIPT" ]]; then
 fi
 
 TEST_ROOT=$(mktemp -d "${TMPDIR:-/tmp}/bsearch-tests.XXXXXX") || exit 2
+# echo ${TEST_ROOT}
 trap 'rm -rf -- "$TEST_ROOT"' EXIT
 
 PASS=0
@@ -71,6 +72,45 @@ EOF
 esac
 MOCK_PDFINFO
     chmod +x "$TEST_ROOT/bin/pdfinfo"
+
+    cat >"$TEST_ROOT/bin/exiftool" <<'MOCK_EXIFTOOL'
+#!/usr/bin/env bash
+case "${1##*/}" in
+    canon-holiday.jpg)
+        cat <<'EOF'
+File Name : canon-holiday.jpg
+Make : Canon
+Camera Model Name : Canon EOS 80D
+Image Size : 6000x4000
+Orientation : Horizontal (normal)
+File Source : Digital Camera
+Software : Adobe Photoshop
+EOF
+        ;;
+    nikon-portrait.jpeg)
+        cat <<'EOF'
+File Name : nikon-portrait.jpeg
+Make : Nikon
+Camera Model Name : Nikon D750
+Image Size : 3000x4500
+Orientation : Rotate 90 CW
+File Source : Digital Camera
+Software : darktable
+EOF
+        ;;
+    *)
+        cat <<'EOF'
+Make : Unknown
+Camera Model Name : Unknown Camera
+Image Size : 1024x768
+Orientation : Horizontal (normal)
+File Source : Digital Camera
+Software : Unknown
+EOF
+        ;;
+esac
+MOCK_EXIFTOOL
+    chmod +x "$TEST_ROOT/bin/exiftool"
 }
 
 make_fixtures() {
@@ -202,6 +242,56 @@ new_sandbox
 out=$(run_bsearch -t all -r "$CURRENT_ROOT/does-not-exist" 2>&1)
 status=$?
 assert_status_nonzero "$status" "nonexistent root returns nonzero" "$out"
+
+
+
+# 9. Raster image indexing and metadata extraction using the fake exiftool.
+new_sandbox
+mkdir -p -- "$CURRENT_ROOT/photos"
+printf 'fake JPEG fixture\n' >"$CURRENT_ROOT/photos/canon-holiday.jpg"
+printf 'fake JPEG fixture\n' >"$CURRENT_ROOT/photos/nikon-portrait.jpeg"
+
+out=$(run_bsearch -t all -r "$CURRENT_ROOT" 2>&1)
+status=$?
+assert_status_zero "$status" "raster image indexing exits successfully" "$out"
+assert_contains "$out" "Created 2 hash index entries." \
+    "both raster image fixtures are indexed"
+
+# These searches exercise the metadata keys normalized by extract_metadata:
+# Make -> make, Camera Model Name -> camera, Image Size -> resolution,
+# File Source -> source, plus orientation and software.
+out=$(run_bsearch -s "make:canon" 2>&1)
+assert_contains "$out" "$CURRENT_ROOT/photos/canon-holiday.jpg" \
+    "image metadata search finds camera make"
+
+out=$(run_bsearch -s "camera:canon" 2>&1)
+assert_contains "$out" "$CURRENT_ROOT/photos/canon-holiday.jpg" \
+    "image metadata search finds camera model"
+
+out=$(run_bsearch -s "resolution:6000x4000" 2>&1)
+assert_contains "$out" "$CURRENT_ROOT/photos/canon-holiday.jpg" \
+    "image metadata search finds image resolution"
+
+out=$(run_bsearch -s "orientation:rotate" 2>&1)
+assert_contains "$out" "$CURRENT_ROOT/photos/nikon-portrait.jpeg" \
+    "image metadata search finds orientation"
+
+out=$(run_bsearch -s "source:digital" 2>&1)
+assert_contains "$out" "$CURRENT_ROOT/photos/canon-holiday.jpg" \
+    "image metadata search finds file source"
+
+out=$(run_bsearch -s "software:darktable" 2>&1)
+assert_contains "$out" "$CURRENT_ROOT/photos/nikon-portrait.jpeg" \
+    "image metadata search finds software"
+
+out=$(run_bsearch -s "make:canon" 2>&1)
+assert_not_contains "$out" "$CURRENT_ROOT/photos/nikon-portrait.jpeg" \
+    "image metadata search does not return a different camera make"
+
+# List-metadata CLI: all indexed metadata keys should include image keys.
+out=$(run_bsearch -m 2>&1)
+assert_contains "$out" "camera" "metadata listing includes camera key"
+assert_contains "$out" "resolution" "metadata listing includes resolution key"
 
 printf '\nResults: %d passed, %d failed\n' "$PASS" "$FAIL"
 if (( FAIL > 0 )); then

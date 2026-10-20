@@ -7,8 +7,8 @@ and written in bash script.
 
 1. `bash` - version 4.0 and up
 2. `findutils` - for the `find` command
-3. `poppler-utils` OR `libimage-exiftool-perl` - for the `pdfinfo` or `exiftool`
-   commands, for indexing metadata of PDF files.
+3. `poppler-utils` - for `pdfinfo`, to index metadata of PDF files.
+4. `libimage-exiftool-perl` - for `exiftool`, to index metadata of Images.
 
 Install dependecies using your native package manager.
 For systems using `apt`
@@ -64,7 +64,7 @@ When indexing, it gives a running count of the files.
 	Created 48171 total index entries.
 
 Note that the indexing is done only for file metadata — such as paths and file extension and document
-level metadata for PDFs. No actual content is ingested.
+level metadata for PDF documents and Images. No actual content is ingested.
 
 Hidden folders and files are always skipped.
 
@@ -99,7 +99,29 @@ For metadata search, give the query in "<field>:<value>" format. For example "pr
 	/home/anand/Documents/Architect.pdf
 	/home/anand/Documents/WordSample.pdf	
 
-Currently we index metadata of only PDF files so such queries make sense only for PDFs.
+Note that for meta search strings with spaces doesn't work so if you want to search for a value containing spaces, split it into its sub-strings and search for any. E.g: `source:digital` for `digital camera`.
+
+Currently we index metadata of PDFs and Images, so these queries make sense only for these documents.
+
+
+## Metadata Keys
+
+The following are the metadata keys available for search.
+
+| Metadata Key | What it stands for | Document Type | Example |
+|---|---|---|---|
+| `creator` | Software which originally created the source of the PDF document | PDF | `word` |
+| `producer` | Software which originally exported the original document to PDF | PDF | `libreoffice` |
+| `version` | Version of the document | PDF | `1.7` |
+| `title` | Title of the document | PDF | `untitled` |
+| `encrypted` | Is the PDF document encrypted? (yes or no) | PDF | `yes` |
+| `tagged` | Is the PDF document tagged? (yes or no) | PDF | `yes` |
+| `make` | Make of the camera or device | Image | `nikon` |
+| `camera` | Actual model name of the camera or device | Image | `d5300` |
+| `resolution` | Resolution of the image | Image | `6000x4000` |
+| `orientation` | Orientation of the image | Image | `horizontal`, `rotate 90 cw` |
+| `software` | Software that processed the image | Image | `picasa`, `gimp` |
+| `source` | Type of the source of image | Image | `digital camera` |
 
 ## Storage
 
