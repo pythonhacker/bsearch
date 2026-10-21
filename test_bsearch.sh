@@ -236,7 +236,7 @@ mkdir -p -- "$CURRENT_ROOT"
 out=$(run_bsearch -t all -r "$CURRENT_ROOT" 2>&1)
 status=$?
 assert_status_nonzero "$status" "empty root returns nonzero" "$out"
-assert_contains "$out" "No files were found" "empty root reports that no files were found"
+assert_contains "$out" "no files were found" "empty root reports that no files were found"
 
 new_sandbox
 out=$(run_bsearch -t all -r "$CURRENT_ROOT/does-not-exist" 2>&1)
