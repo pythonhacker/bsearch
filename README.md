@@ -91,7 +91,7 @@ Examples:
 
 	[2026-10-21 18:02:48] Found 3 hits for query "python".
 	
-For metadata search, give the query in "<field>:<value>" format. For example "producer:word" or "title:untitled".
+For metadata search, give the query in "&lt;field&gt;:&lt;value&gt;" format. For example "producer:word" or "title:untitled".
 
 	$ ./bsearch -s "producer:word"
 	[2026-10-21 18:04:34] Performing meta search using key=producer and value=word
