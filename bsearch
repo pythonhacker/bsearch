@@ -8,7 +8,7 @@ shopt -s nullglob
 
 # Main params
 FILE_TYPE=""
-ROOT_FOLDER="${PWD}"
+ROOT_FOLDER=""
 SEARCH_QUERY=""
 META_KEY=""
 META_KEY_OPTION=0
@@ -78,7 +78,7 @@ Options:
                 Index files with this extension/type (e.g: pdf, docx, all)  
                 This can also be a mimetype like "image/jpeg" in case all the
                 matching extensions are indexed.
-    -r ROOT     Directory to scan (defaults to: ${PWD}).
+    -r ROOT     Directory to scan.
     -s QUERY    Run in search mode, searching results for "query".
                 For meta queries use "field:query" format, e.g: "creator: writer"
                 or "title:untitled".
@@ -136,27 +136,14 @@ store_put () {
     local key=$1; index=$2; value=$3;
     # How many keys put
     local count=0
-    # Key with spaces - create separate entries for each item
-    if [[ ${key} =~ [[:space:]] ]]; then
-        for sub_key in ${key}
-        do
-            local file_path="${INDEX_FOLDER}/${index}/${sub_key}"
-            # Check if file exists AND if the value is already inside it
-            if [[ -f "$file_path" ]] && grep -Fq "$value" "$file_path"; then
-                continue # Skip to the next sub_key if value already exists
-            fi
-            printf %s "$value" >>"${file_path}";
-            ((count+=1))
-        done
-    else
-        # Single key
-        local file_path="${INDEX_FOLDER}/${index}/${key}"
-        if [[ -f "$file_path" ]] && grep -Fq "$value" "$file_path"; then
-            return ${count}                 
-        fi
-        printf %s "$value" >>"${file_path}"
-        ((count+=1))        
+    # Single key
+    local file_path="${INDEX_FOLDER}/${index}/${key}"
+    if [[ -f "$file_path" ]] && grep -Fq "$value" "$file_path"; then
+        return ${count}                 
     fi
+    printf "%s\n" "$value" >>"${file_path}"
+    ((count+=1))        
+    # fi
 
     return ${count}
 }
@@ -202,26 +189,15 @@ store_put_meta () {
     safe_sub_key="${sub_key//\//-}"
     local dir_path="${INDEX_FOLDER}/${index}/${key}/"
     mkdir -p "${dir_path}"
-	# This is not required, since we use wildcards for search
-    # for sub in ${safe_sub_key}
-    # do
-    #     local file_path="${dir_path}/${sub}"
-    #     # Check if file exists AND if the value is already inside it
-    #     if [[ -f "$file_path" ]] && grep -Fq "$value" "$file_path"; then
-    #         continue # Skip to the next sub_key if value already exists
-    #     fi
-    #     printf %s "$value" >>"${file_path}";
-    #     ((count+=1))
-    # done
 
-    # Also for the entire subkey
+	# Add for safe subkey
     local file_path="${dir_path}/${safe_sub_key}"
     if [[ -f "$file_path" ]] && grep -Fq "$value" "$file_path"; then
         return ${count}     
     fi
     # Skip the entire subkey if the filename is too long
     if (( ${#file_path} < ${FILENAME_MAX} )); then
-        printf %s "$value" >>"${file_path}"
+        printf "%s\n" "$value" >>"${file_path}"
     fi
     ((count+=1))        
 
@@ -414,7 +390,7 @@ extract_metadata() {
 						;;
 				esac
                 # echo "Store putting ${key} ${file_id}"
-                store_put_meta "${key}" "${value}" "${file_id}\n"
+                store_put_meta "${key}" "${value}" "${file_id}"
                 local ret=$?
                 ((total+=ret))
             fi
@@ -502,9 +478,8 @@ perform_search() {
     else
         # Try exact match
         printf "\n"
-        matches=$(store_get "${SEARCH_QUERY}" "${PATH_INDEX}")
-        # Also try fuzzy matches
-        matches+=$(store_fuzzy_get "${SEARCH_QUERY}" "${PATH_INDEX}")
+		# Fuzzy match only as it gets exact matches also
+        matches=$(store_fuzzy_get "${SEARCH_QUERY}" "${PATH_INDEX}")
     fi
     # Split by array
     IFS=$'\\n' read -d '' -r -a hits <<< "$matches"
@@ -584,7 +559,7 @@ index_files() {
             # Lowercase
             local path_l=${path,,}
             # This goes to the path index
-            store_put "$path_l" ${PATH_INDEX} "$file_id\n"
+            store_put "$path_l" ${PATH_INDEX} "$file_id"
             local ret_path=$?
             ((index_total+=ret_path))
             ((index_path+=ret_path))                            
@@ -639,6 +614,9 @@ if [[ ${META_KEY_OPTION} -eq 1 ]]; then
 	list_meta_keys
 elif [[ -n "${SEARCH_QUERY}" ]]; then
     perform_search
-else
+elif [[ -n "${ROOT_FOLDER}" ]]; then
     perform_index
+else
+	usage
+	exit 1
 fi

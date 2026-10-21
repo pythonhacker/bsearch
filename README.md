@@ -212,6 +212,7 @@ It uses a simple inverted index that uses folders and files as keys and contents
 
 When not indexing metadata, at the rate of about 60 files/second.
 When indexing PDF metadata, at the rate of about 17 files/second.
+When indexing Image metadata with GPS information, at the rate of about 6 files/second.
 
 Benchmark were done on a Lenovo laptop with 16 core CPU/24GB RAM on a linux ext4 filesystem.
 
@@ -227,4 +228,5 @@ In order of decreasing priority:-
 | Issue | Notes | Type |
 |---|---|---|
 | Implement multiple keyword search | Very useful | Search |
+| Implement a search grammar | Nice to have | Search |
 | Try parallel indexing using `parallel` or `xargs` | Indexing is slow for Images with GPS information | Indexing |
