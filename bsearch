@@ -25,6 +25,18 @@ META_INDEX="meta.db"
 FILENAME_MAX=$(getconf NAME_MAX ${HOME})
 
 die() { printf 'bsearch: error: %s\n' "$*" >&2; exit 2; }
+log() {
+	local timestamp
+    timestamp=$(date "+%Y-%m-%d %H:%M:%S")
+	printf "[${timestamp}] $*\n" >&2
+}
+
+# Log without newline
+log_non() {
+	local timestamp
+    timestamp=$(date "+%Y-%m-%d %H:%M:%S")
+	printf "\r[${timestamp}] $*" >&2
+}
 
 # Temp file containing file paths
 paths_file="$(mktemp "/tmp/.paths.XXXXXX")" || { rm -f -- "$tmp_index"; die "cannot create temporary path list"; }
@@ -262,14 +274,14 @@ store_get_hash () {
 start_message() {
 	
     if [[ -n "${SEARCH_QUERY}" ]]; then
-        printf "Running in search mode with query \"${SEARCH_QUERY}\"\n"
+        log "Running in search mode with query \"${SEARCH_QUERY}\"" 
     elif [[ -n ${FILE_TYPE} ]]; then
-        printf "Running in indexing mode - invoked on \"${ROOT_FOLDER}\" with filetype ${FILE_TYPE}\n"
+        log "Running in indexing mode - invoked on \"${ROOT_FOLDER}\" with filetype ${FILE_TYPE}"
     elif [[ ${META_KEY_OPTION} -eq 1 ]]; then
 		printf ""
 		# Don't print any mode
 	else
-        printf "Running in indexing mode - Invoked on \"${ROOT_FOLDER}\"\n"
+        log "Running in indexing mode - Invoked on \"${ROOT_FOLDER}\"" 
     fi
 }
 
@@ -297,8 +309,7 @@ list_meta_keys() {
 		# inside META_INDEX folder.
 		meta_path="${INDEX_FOLDER}/${META_INDEX}/${META_KEY}"
 		if [[ ! -d "${meta_path}" ]]; then
-			printf "Error - no metadata found matching key '${META_KEY}'\n"
-			exit 1
+			die "no metadata found matching key '${META_KEY}'" 
 		fi
 	fi
 
@@ -307,9 +318,9 @@ list_meta_keys() {
 	count="${#files[@]}"
 	index=0
 	if [[ -z "${META_KEY}" ]]; then	
-		printf "${count} unique meta keys found in the index.\n\n"
+		log "${count} unique meta keys found in the index.\n"
 	else
-		printf "Found ${count} unique keys for '${META_KEY}'\n\n"
+		log "Found ${count} unique keys for '${META_KEY}'\n"
 	fi
 	
 	for fpath in "${files[@]}"; do
@@ -345,8 +356,9 @@ list_hits() {
         printf "%s\n" "${fpath}"
         ((count+=1))
     done
-    
-    printf "\nFound ${count} hits for query \"${SEARCH_QUERY}\".\n" 
+    printf "\n"
+	
+    log "Found ${count} hits for query \"${SEARCH_QUERY}\"."
 }
 
 # Generic function to extract metadata given metadata string
@@ -379,21 +391,28 @@ extract_metadata() {
                 # echo "Key match: ${key}"          
                 # Store it with a proper prefix
                 # key substitutions - pdfs
-                if [[ "${key}" == "pdf version" ]]; then
-                    key="version"
-                elif [[ "${key}" == "encrypted" ]]; then
-                    # For encrypted we only need the yes or no
-                    # ignore anything in (...) after it
-                    value="${value%%(*}"                    
-                # For images
-                elif [[ "${key}" == "camera model name" ]]; then
-                    key="camera"
-                elif [[ "${key}" == "file source" ]]; then
-                    key="source"
-                elif [[ "${key}" == "image size" ]]; then
-                    key="resolution"                                        
-                fi
-
+				case "${key}" in
+					"pdf_version")
+						key="version"
+						;;
+					"encrypted")
+						# For encrypted we only need the yes or no
+						# ignore anything in (...) after it
+						value="${value%%(*}"
+						;;
+					"camera model name")
+						key="camera"
+						;;
+					"file source")
+						key="source"
+						;;
+					"image size")
+						key="resolution"
+						;;
+					geolocation\ *)
+						key="${key#geolocation }"
+						;;
+				esac
                 # echo "Store putting ${key} ${file_id}"
                 store_put_meta "${key}" "${value}" "${file_id}\n"
                 local ret=$?
@@ -427,6 +446,17 @@ extract_metaimage() {
     extract_metadata "${metadata}" "${meta_keys[@]}"
     local total=$?
 
+	# GPS zero data pattern
+	zero_pattern="GPS (Latitude|Longitude)[[:space:]]*:[[:space:]]*0 deg 0' 0\.00\""
+	# Fetch GPS data and build GPS keys if available, ignore zero GPS data
+	if [[ "${metadata}" == *"GPS"* ]] && [[ ! "${metadata}" =~ ${zero_pattern} ]]; then
+		# Run exiftool again and capture GPS details
+		gps_metadata=$(${exiftool_cmd} -api geolocation "-geolocation*" "${fpath}" 2>/dev/null)
+		local gps_meta_keys=("geolocation city" "geolocation region" "geolocation subregion" "geolocation country")
+		extract_metadata "${gps_metadata}" "${gps_meta_keys[@]}"
+		((total++))
+	fi
+	
     return ${total}
 }
 
@@ -467,7 +497,7 @@ perform_search() {
         key="${query%%:*}"
         # Split to right of :
         value="${query#*:}"
-        printf "Performing meta search using key=${key} and value=${value}\n\n"
+        log "Performing meta search using key=${key} and value=${value}\n"
         matches=$(store_get_meta "${key}" "${value}")
     else
         # Try exact match
@@ -495,15 +525,14 @@ build_flist() {
     extn=${extn,,}
     if [[ "$extn" =~ ^[[a-z0-9]+/[a-z0-9]+$ ]];
        then
-           printf "Mimetype given, fetching extensions for ${extn}\n"
+           log "Mimetype given, fetching extensions for ${extn}"
            extns=$(awk -v e="${extn}" '$1 == e { $1=""; print }' /etc/mime.types)
            if [[ -z "${extns}" ]]; then
-               printf "Error - no extenions found for mimetype ${extn}!\n"
-               exit 1
+               die "no extenions found for mimetype ${extn}!"
            fi
        fi
         
-    printf "Building list of files...\n"
+    log "Building list of files..."
     if [[ -n "${extns}" ]]; then
         # Convert to array
         extns=( $extns )
@@ -524,7 +553,7 @@ build_flist() {
         while IFS= read -r -d '' fpath; do
             printf '%s\n' "$fpath" >> "$paths_file"
             ((count++))
-            printf "\rProcessed #%d files." "$count"
+            log_non "Processed #${count} files."
         done
 }       
 
@@ -533,8 +562,9 @@ index_files() {
 	
     local total=0; index_total=0; index_meta=0; index_hash=0; index_path=0;
     local current_path="";
-	
-    printf "\nCreating indices...\n"
+
+	printf "\n"
+    log "Creating indices..."
     while IFS= read -r current_path;
     do
         # Trim newline if any
@@ -577,13 +607,13 @@ index_files() {
             ((index_total+=ret_meta))                   
         fi
         ((total+=1))
-        printf "\rIndexed #%d files..." "${total}"       
+        log_non "Indexed #${total} files..."
     done < "$paths_file"
-    printf "\n"
-    printf "Created %d hash index entries.\n" ${index_hash}
-    printf "Created %d path index entries.\n" ${index_path}                 
-    printf "Created %d meta index entries.\n" ${index_meta}
-    printf "Created %d total index entries.\n" ${index_total}
+    printf "\n" >&2
+	log "Created ${index_hash} hash index entries." 
+    log "Created ${index_path} path index entries."
+    log "Created ${index_meta} meta index entries."
+    log "Created ${index_total} total index entries."
 }
 
 # Performs the file indexing
@@ -596,8 +626,7 @@ perform_index() {
     local line_count=$(wc -l < "$paths_file")
     if [[ ${line_count} -eq 0 ]];
     then
-        printf "No files were found, goodbye."
-        exit 1
+        die "no files were found, goodbye."
     fi
     # printf "\n$paths_file"
     index_files
