@@ -136,19 +136,6 @@ store_put () {
     local key=$1; index=$2; value=$3;
     # How many keys put
     local count=0
-    # Key with spaces - create separate entries for each item
-    # if [[ ${key} =~ [[:space:]] ]]; then
-    #     for sub_key in ${key}
-    #     do
-    #         local file_path="${INDEX_FOLDER}/${index}/${sub_key}"
-    #         # Check if file exists AND if the value is already inside it
-    #         if [[ -f "$file_path" ]] && grep -Fq "$value" "$file_path"; then
-    #             continue # Skip to the next sub_key if value already exists
-    #         fi
-    #         printf "%s\n" "$value" >>"${file_path}";
-    #         ((count+=1))
-    #     done
-    # else
     # Single key
     local file_path="${INDEX_FOLDER}/${index}/${key}"
     if [[ -f "$file_path" ]] && grep -Fq "$value" "$file_path"; then
