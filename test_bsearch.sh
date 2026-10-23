@@ -288,6 +288,50 @@ out=$(run_bsearch -s "make:canon" 2>&1)
 assert_not_contains "$out" "$CURRENT_ROOT/photos/nikon-portrait.jpeg" \
     "image metadata search does not return a different camera make"
 
+# 10. Multi-atom AND search: explicit AND between regular keywords.
+out=$(run_bsearch -s "canon AND holiday" 2>&1)
+assert_contains "$out" "$CURRENT_ROOT/photos/canon-holiday.jpg" \
+    "explicit AND search returns a file matching both keywords"
+assert_not_contains "$out" "$CURRENT_ROOT/photos/nikon-portrait.jpeg" \
+    "explicit AND search excludes a file matching neither keyword"
+
+out=$(run_bsearch -s "canon AND nikon" 2>&1)
+assert_not_contains "$out" "$CURRENT_ROOT/photos/canon-holiday.jpg" \
+    "explicit AND search returns no file when keywords match different files"
+
+# 11. Multi-atom AND search: whitespace implies AND.
+out=$(run_bsearch -s "nikon portrait" 2>&1)
+assert_contains "$out" "$CURRENT_ROOT/photos/nikon-portrait.jpeg" \
+    "implicit AND search returns a file matching both keywords"
+assert_not_contains "$out" "$CURRENT_ROOT/photos/canon-holiday.jpg" \
+    "implicit AND search excludes a file that does not match both keywords"
+
+out=$(run_bsearch -s "nikon alpha" 2>&1)
+assert_not_contains "$out" "$CURRENT_ROOT/photos/nikon-portrait.jpeg" \
+    "implicit AND search returns no file when one keyword is absent"
+
+# 12. Multi-atom search combining metadata and a regular keyword.
+out=$(run_bsearch -s "camera:canon AND holiday" 2>&1)
+assert_contains "$out" "$CURRENT_ROOT/photos/canon-holiday.jpg" \
+    "metadata plus regular keyword search returns the matching image"
+assert_not_contains "$out" "$CURRENT_ROOT/photos/nikon-portrait.jpeg" \
+    "metadata plus regular keyword search excludes a different camera"
+
+out=$(run_bsearch -s "camera:canon AND portrait" 2>&1)
+assert_not_contains "$out" "$CURRENT_ROOT/photos/canon-holiday.jpg" \
+    "metadata plus regular keyword search returns no result when the keyword misses"
+
+# 13. Multi-atom search combining metadata, a regular keyword, and extension.
+out=$(run_bsearch -s "camera:canon AND holiday AND ext:jpg" 2>&1)
+assert_contains "$out" "$CURRENT_ROOT/photos/canon-holiday.jpg" \
+    "metadata, keyword, and ext:jpg search returns the matching image"
+assert_not_contains "$out" "$CURRENT_ROOT/photos/nikon-portrait.jpeg" \
+    "metadata, keyword, and ext:jpg search excludes the other image"
+
+out=$(run_bsearch -s "camera:canon AND holiday AND ext:jpeg" 2>&1)
+assert_not_contains "$out" "$CURRENT_ROOT/photos/canon-holiday.jpg" \
+    "metadata, keyword, and mismatched extension returns no result"
+
 # List-metadata CLI: all indexed metadata keys should include image keys.
 out=$(run_bsearch -m 2>&1)
 assert_contains "$out" "camera" "metadata listing includes camera key"
