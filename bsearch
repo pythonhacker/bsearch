@@ -271,6 +271,72 @@ split_path() {
     done
 }
 
+perform_meta_search() {
+	# Split by AND if any
+	local query="${SEARCH_QUERY,,}"
+	local delim=" and "
+	
+    if [[ "${query}" =~ "${delim}" ]]; then
+		# Replace any " and " occurrences with spaces
+		query="${query//${delim}/ }"
+	fi
+	# Split by spaces
+	local search_terms=($query)
+	# Match any ext:<value> term
+	local ext_term=""
+	for index in "${!search_terms[@]}"; do
+		local term="${search_terms[index]}"
+		if [[ "${term}" =~ ^"ext" ]]; then
+			# Drop such terms and match them at end
+			# Only pick the very first term like this
+			ext_term="${term#*:}"			
+			unset "search_terms[$index]"
+			# Re-index the array
+			search_terms=("${search_terms[@]}")
+			break
+		fi
+		((index++))
+	done
+
+	# If ext term and it doesn't start with ".", add a "."
+	if [[ -n "${ext_term}" ]] && [[ ! "${ext_term}" =~ ^"." ]]; then
+		ext_term=".${ext_term}"
+	fi
+
+	local term_count=${#search_terms[@]}
+	
+	# If there is only one search term
+	if [[ ${term_count} -eq 1 ]]; then
+		local term=${search_terms[0]}
+		local hits=($(perform_search "${term}"))
+		list_hits "${ext_term}" "${hits[@]}" 
+	else
+		local search_hits=()
+		# First make hits from first term
+		local term1="${search_terms[0]}"
+		local hits=($(perform_search "${term1}"))
+		# dedup it
+		local hits_dedup=($(dedup_array "${hits[@]}"))
+		# Now get hits for other terms and find
+		# common items
+		for term in "${search_terms[@]}"; do
+			# Perform search for each
+			local hits_new=($(perform_search "${term}"))
+			# Dedup it
+			local hits_dedup_new=($(dedup_array "${hits_new[@]}"))
+			# Now find common items between first and this
+			mapfile -t hits_common < <(
+				cat <(printf '%s\n' "${hits_dedup[@]}" | sort -u) \
+					<(printf '%s\n' "${hits_dedup_new[@]}" | sort -u) | sort | uniq -d
+			)
+			# Reassign to hits_dedup1
+			hits_dedup=("${hits_common[@]}")
+		done
+
+		list_hits "${ext_term}" "${hits_dedup[@]}"
+	fi
+}
+
 # List meta keys
 list_meta_keys() {
 
@@ -306,35 +372,60 @@ list_meta_keys() {
 	done
 }
 
+dedup_array() {
+	declare -A unique_map
+
+	local items=("$@")
+    for item in ${items[@]}
+    do
+		if [[ -z "${item}" ]]; then
+			continue
+		fi
+        unique_map[$item]=1
+    done	
+
+	items_dedup=("${!unique_map[@]}")	
+	echo "${items_dedup[@]}"
+}
+
 # List the search hits
 list_hits() {
     # Reconstruct into array
+	local ext_term="$1"
+	shift
     local hits=("$@")
-    count=0
+    local count=0
 
     # Remove dups
     declare -A unique_map
-    
-    for hit in ${hits[@]}
-    do
-        # Map to filename by looking up the hash index
-        # fpath=$(store_get ${hit} ${HASH_INDEX})
-        fpath=$(store_get_hash ${hit})
-        if [[ -z "${fpath}" ]]; then
-            continue
-        fi
-        unique_map["$fpath"]=1
-    done
+    local hit_count=0
 
-    # Extract back into regular array
-    hits_dedup=("${!unique_map[@]}")
-    for fpath in "${hits_dedup[@]}"; do
-        printf "%s\n" "${fpath}"
-        ((count+=1))
-    done
-    printf "\n"
+	hit_count=${#hits[@]}
 	
-    log "Found ${count} hits for query \"${SEARCH_QUERY}\"."
+	if [[ ${hit_count} -gt 0 ]]; then
+		printf "\n" >&2
+	
+		# Extract back into regular array
+		hits_dedup=($(dedup_array "${hits[@]}"))	
+		for hit in "${hits_dedup[@]}"; do
+			fpath=$(store_get_hash ${hit})
+			if [[ -z "${fpath}" ]]; then
+				continue
+			fi
+			
+			# If ext term is specified make sure the extension matches
+			if [[ -z "${ext_term}" ]]; then
+				printf "\"%s\"\n" "${fpath}"
+				((count++))				
+			elif [[ "${fpath}" =~ "${ext_term}"$ ]]; then
+				printf "\"%s\"\n" "${fpath}"				
+				((count++))
+			fi
+		done
+		printf "\n" >&2
+	fi
+
+	log "Found ${count} hits for query \"${SEARCH_QUERY}\"\n"	
 }
 
 # Generic function to extract metadata given metadata string
@@ -466,25 +557,25 @@ extract_metapdf() {
 }
 
 perform_search() {
+	query="$1"
     # Meta search if there is : in the string
-    if [[ "${SEARCH_QUERY}" == *":"* ]]; then
-        query="${SEARCH_QUERY}"
+    if [[ "${query}" == *":"* ]]; then
         # Split to left of :
         key="${query%%:*}"
         # Split to right of :
         value="${query#*:}"
-        log "Performing meta search using key=${key} and value=${value}\n"
+        log "Performing meta search using key=${key} and value=${value}"
         matches=$(store_get_meta "${key}" "${value}")
     else
         # Try exact match
         printf "\n"
 		# Fuzzy match only as it gets exact matches also
-        matches=$(store_fuzzy_get "${SEARCH_QUERY}" "${PATH_INDEX}")
+        matches=$(store_fuzzy_get "${query}" "${PATH_INDEX}")
     fi
     # Split by array
     IFS=$'\\n' read -d '' -r -a hits <<< "$matches"
-    list_hits "${hits[@]}"
-    
+    # list_hits "${hits[@]}"
+    printf "${hits[@]}"
 }
 
 # Build a list of files to index
@@ -554,6 +645,7 @@ index_files() {
         ((index_hash+=$ret_hash))               
         # Read into an path array
         mapfile -t path_array < <(split_path "$current_path")
+
         # For each entry in path, store it as a reverse index
         for path in ${path_array[@]}; do
             # Lowercase
@@ -564,8 +656,8 @@ index_files() {
             ((index_total+=ret_path))
             ((index_path+=ret_path))                            
         done
-        # Extract metadata entries
-        # Right now only for PDF files
+
+        # Extract metadata entries for PDF/images
         path_l="${current_path,,}"
         if [[ "${path_l}" == *.pdf ]]; then
             extract_metapdf "${current_path}" ${file_id}
@@ -573,7 +665,7 @@ index_files() {
             # Update counts
             ((index_meta+=ret_meta))
             ((index_total+=ret_meta))
-            # Images
+        # Images
         elif [[ "${path_l}" =~ \.(jpg|jpeg|png|gif|webp|bmp|tiff)$ ]]; then
             extract_metaimage "${current_path}" ${file_id}
             local ret_meta=$?
@@ -613,7 +705,7 @@ start_message
 if [[ ${META_KEY_OPTION} -eq 1 ]]; then
 	list_meta_keys
 elif [[ -n "${SEARCH_QUERY}" ]]; then
-    perform_search
+    perform_meta_search
 elif [[ -n "${ROOT_FOLDER}" ]]; then
     perform_index
 else

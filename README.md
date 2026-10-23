@@ -110,9 +110,32 @@ For metadata search, give the query in "&lt;field&gt;:&lt;value&gt;" format. For
 
 	[2026-10-21 18:18:07] Found 1 hits for query "camera:iphone".
 
-Note that for meta search strings with spaces doesn't work so if you want to search for a value containing spaces, split it into its sub-strings and search for any. E.g: `source:digital` for `digital camera`. Also multiple keyword search is not supported right now. 
+### Multiple keyword search
 
-Currently we index metadata of PDFs and Images, so these queries make sense only for these documents.
+You can combine multiple search conditions in one query. All conditions are combined with **AND** semantics: a file is returned only when it matches every condition.
+
+You can write `AND` explicitly or simply separate terms with spaces. These two queries have the same effect:
+
+	$ ./bsearch -s "canon AND holiday"
+	$ ./bsearch -s "canon holiday"
+
+Both search for files matching `canon` and `holiday`. If the terms match different files, those files are not returned as a match for the combined query.
+
+Metadata searches can be combined with regular keywords:
+
+	$ ./bsearch -s "camera:canon AND holiday"
+
+This finds files whose camera metadata matches `canon` and whose indexed path/filename terms match `holiday`.
+
+Use the `ext:` prefix to restrict results to a file extension. For example:
+
+	$ ./bsearch -s "camera:canon AND holiday AND ext:jpg"
+
+This requires all three conditions to match: camera metadata matching `canon`, a regular keyword matching `holiday`, and the `.jpg` extension. The extension filter can also be combined with regular keyword searches, such as `goa AND ext:jpg`.
+
+Examples of queries that should not return a result include `canon AND holiday` when no single file matches both terms, `camera:canon AND missingword` when the keyword is absent, and `camera:canon AND holiday AND ext:png` when the matching image is a JPEG rather than a PNG.
+
+Metadata is indexed for PDFs and images; metadata conditions such as `camera:canon` therefore apply to files with the corresponding indexed metadata. Regular terms search the indexed file/path information, not the contents of files.
 
 
 ### Piping Output
@@ -221,12 +244,3 @@ A unit test file is available, run it using:
 
 	$ ./test_bsearch.sh ./bsearch
 	
-## TODO
-
-In order of decreasing priority:-
-
-| Issue | Notes | Type |
-|---|---|---|
-| Implement multiple keyword search | Very useful | Search |
-| Implement a search grammar | Nice to have | Search |
-| Try parallel indexing using `parallel` or `xargs` | Indexing is slow for Images with GPS information | Indexing |
