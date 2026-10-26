@@ -12,6 +12,7 @@ ROOT_FOLDER=""
 SEARCH_QUERY=""
 META_KEY=""
 META_KEY_OPTION=0
+DATE_FROM_FILE=0
 
 # Constants
 INDEX_FOLDER="${HOME}/.local/state/bsearch.db"
@@ -70,27 +71,30 @@ Usage:
     bsearch -r [root_dir]
     bsearch -s [query]
     bsearch -l [<meta_key>]
+	bsearch -d
 	bsearch -m
 
-Options:
-    -t EXTN/MIMETYPE
 
+Options:
+
+Indexing Options::
+    -t EXT/MIMETYPE
                 Index files with this extension/type (e.g: pdf, docx, all)  
-                This can also be a mimetype like "image/jpeg" in case all the
+                This can also be a mimetype like "image/jpeg", in which case all the
                 matching extensions are indexed.
     -r ROOT     Directory to scan.
+    -d          If enabled, picks the year up from the file name using the
+                regex YYYYMMDD like IMG-20160425-WA0001.jpg or 20221005_201653.jpg
+                than from image metadata. 
+
+Search Options::
     -s QUERY    Run in search mode, searching results for "query".
                 For meta queries use "field:query" format, e.g: "creator: writer"
                 or "title:untitled".
     -l META_KEY List all unique keys found for the given "meta_key".
                 For example "-l camera" lists unique camera models found from
                 image metadata.
-	-m          Prints all meta keys in the current index.
-
-CAVEATS:
-
-1. Boolean queries are not supported right now. Only a single search query can be run.
-2. Metadata processing and search only available for PDF files.
+    -m          Prints all meta keys in the current index.
  
 EOF
 }
@@ -102,7 +106,7 @@ if [ $# -eq 0 ]; then
 fi
 
 # Parse arguments
-while getopts 't:r:s:l:mh' opt; do
+while getopts 't:r:s:l:mdh' opt; do
     case $opt in
         t)
             FILE_TYPE="$OPTARG";
@@ -121,6 +125,9 @@ while getopts 't:r:s:l:mh' opt; do
 			META_KEY_OPTION=1;;
 		m)
 			META_KEY_OPTION=1;;
+		d)
+			printf "Enabling date detection from filename\n";
+			DATE_FROM_FILE=1;;
         ?|h)
             usage;
             exit 1;;
@@ -428,9 +435,52 @@ list_hits() {
 	log "Found ${count} hits for query \"${SEARCH_QUERY}\"\n"	
 }
 
+# Extract year from timestamp
+extract_year() {
+	local timestamp="$1";
+	local fpath="$2";
+	local valid=0
+	local year=0
+	
+	# Year now
+	local toyear=$(date +%Y)
+	# If DATE_FROM_FILE is enabled try to fetch
+	# date stamp from the filename
+	if [[ $DATE_FROM_FILE -eq 1 ]]; then
+		local fname=$(basename "${fpath}")
+		# Look for strings like 20160425
+		local datestamp=$(echo "${fname}" | grep -oE '[0-9]{8}')
+		# Now do some basic checks
+		if [[ -n "${datestamp}" ]]; then
+			year=${datestamp:0:4}
+			local month=${datestamp:4:2}
+			local day=${datestamp:6:2}
+			# Make sure to convert these to decimal
+			# in case of leading zeros
+			month=$((10#$month))
+			day=$((10#$day))			
+			# Check some ranges
+			[[ $year -ge 1970 ]] && [[ $year -le $toyear ]] && \
+				[[ $month -ge 1 ]] && [[ $month -le 12 ]] && \
+				[[ $day -ge 1 ]] && [[ $day -le 31 ]] && valid=1
+			if [[ $valid -eq 1 ]]; then
+				echo "${year}"
+			fi
+		fi
+	fi
+	if [[ $valid -eq 0 ]]; then
+		year=$(echo "${timestamp}" | grep -oE '^[0-9]{4}')
+		if [[ -n "${year}" ]]; then
+			echo "${year}"
+		fi
+	fi
+}
+
 # Generic function to extract metadata given metadata string
 # and interested keys
 extract_metadata() {
+	local fpath="$1"
+    shift	
     local metadata="$1"
     shift
     local meta_keys=("$@")
@@ -459,7 +509,7 @@ extract_metadata() {
                 # Store it with a proper prefix
                 # key substitutions - pdfs
 				case "${key}" in
-					"pdf_version")
+					"pdf version")
 						key="version"
 						;;
 					"encrypted")
@@ -476,18 +526,28 @@ extract_metadata() {
 					"image size")
 						key="resolution"
 						;;
+					"creationdate"|"create date"|"file modification date/time")
+						key="year";
+						value=$(extract_year "${value}" "${fpath}");
+						;;
 					geolocation\ *)
 						key="${key#geolocation }"
 						;;
 				esac
-                # echo "Store putting ${key} ${file_id}"
+                # echo "Store putting ${key} ${value} ${file_id}"
                 store_put_meta "${key}" "${value}" "${file_id}"
                 local ret=$?
                 ((total+=ret))
             fi
         done
-    done < <(printf "%s" "${metadata}" | awk -F ':' 'NF>=2{print $1 "|" $2}')
-
+	# Using this logic has a bug -- if values contain ":" like timestamps
+    # done < <(printf "%s" "${metadata}" | awk -F ':' 'NF>=2{print $1 "|" $2}')
+	done < <(
+		# This logic fixes it
+		printf "%s" "${metadata}" |
+			awk 'index($0, ":") { key = $0; sub(/:.*/, "", key); value = $0; sub(/^[^:]*:/, "", value); print key "|" value }'
+	)
+	
     return ${total}
 }
 
@@ -509,8 +569,8 @@ extract_metaimage() {
 
     # echo "Extracting meta image for ${fpath}"
     # Fetch all metadata of interest
-    local meta_keys=("make" "camera model name" "image size" "orientation" "file source" "software")
-    extract_metadata "${metadata}" "${meta_keys[@]}"
+    local meta_keys=("make" "camera model name" "image size" "orientation" "file source" "software" "create date" "file modification date/time")
+    extract_metadata "${fpath}" "${metadata}" "${meta_keys[@]}"
     local total=$?
 
 	# GPS zero data pattern
@@ -520,7 +580,7 @@ extract_metaimage() {
 		# Run exiftool again and capture GPS details
 		gps_metadata=$(${exiftool_cmd} -api geolocation "-geolocation*" "${fpath}" 2>/dev/null)
 		local gps_meta_keys=("geolocation city" "geolocation region" "geolocation subregion" "geolocation country")
-		extract_metadata "${gps_metadata}" "${gps_meta_keys[@]}"
+		extract_metadata "${fpath}" "${gps_metadata}" "${gps_meta_keys[@]}"
 		((total++))
 	fi
 	
@@ -549,8 +609,10 @@ extract_metapdf() {
     fi
 
     # These are our keys of interest
-    local meta_keys=("creator" "producer" "pdf version" "tagged" "title" "encrypted")
-    extract_metadata "${metadata}" "${meta_keys[@]}"
+	# creationdate: pdfinfo
+	# create date: exiftool
+    local meta_keys=("creator" "creationdate" "create date" "producer" "pdf version" "tagged" "title" "encrypted") 
+    extract_metadata "${fpath}" "${metadata}" "${meta_keys[@]}"
     local total=$?
     
     return ${total}
@@ -659,6 +721,8 @@ index_files() {
 
         # Extract metadata entries for PDF/images
         path_l="${current_path,,}"
+		# printf "Current: ${current_path}\n"
+	   
         if [[ "${path_l}" == *.pdf ]]; then
             extract_metapdf "${current_path}" ${file_id}
             local ret_meta=$?
