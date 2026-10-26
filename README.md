@@ -67,6 +67,8 @@ level metadata for PDF documents and Images. No actual content is ingested.
 
 Hidden folders and files are always skipped.
 
+For images, if you want to extract the year from the filename instead of the metadata — which maybe incorrect — you can pass the `-d` option. Note this works only if the filename captures the date like `IMG-20160425-WA0001.jpg` for example.
+
 ### Searching 
 
 To search run the tool using `-s` flag and supplying a single search param.
@@ -165,6 +167,7 @@ The following are the metadata keys available for search.
 | `orientation` | Orientation of the image | Image | `horizontal`, `rotate 90 cw` |
 | `software` | Software that processed the image | Image | `picasa`, `gimp` |
 | `source` | Type of the source of image | Image | `digital camera` |
+| `year` | Year of the file creation timestamp | Any | `2025` |
 
 In addition, when photos have proper GPS tags, `exiftool` extracts and indexes them,
 so the following additional keywords become available, here listed in decreasing
@@ -186,7 +189,7 @@ To list all available metadata keys, use `-m` flag. This list currently availabl
 unique metadata keys in the index.
 
 	$ ./bsearch -m
-	[2026-10-21 18:10:10] 16 unique meta keys found in the index.
+	[2026-10-26 22:23:10] 17 unique meta keys found in the index.
 
 	1. camera
 	2. city
@@ -204,6 +207,7 @@ unique metadata keys in the index.
 	14. subregion
 	15. tagged
 	16. title
+	17. year
 
 To list unique values in the index for a given key, use `-l`.
 
@@ -221,7 +225,7 @@ For example to list the unique camera data ingested via Images.
 	7. canon powershot elph 100 hs
 	8. canon powershot s410
 	9. coolpix p520
-	10. cymera
+g	10. cymera
 	11. dmc-s3
 	12. dsc-t70
 	13. e63
